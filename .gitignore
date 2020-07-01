@@ -4,3 +4,4 @@ audio_files/
 *.wav
 *.flac
 *.ogg
+*.pickled

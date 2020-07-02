@@ -6,7 +6,7 @@ from tqdm import tqdm
 import os
 import scipy.signal
 # import simpleaudio as sa
-import pickle
+import compress_pickle
 
 audio_list = [] #Python list of np.array for later conversion to tf.RaggedTensor
 text_list = []  #python list of str for later conversion to tf.RaggedTensor
@@ -22,10 +22,11 @@ def stack_ragged(tensors):#from https://stackoverflow.com/questions/57346556/cre
 
 def load_saved(save_path="./saved_file.pickled"):
     with open(save_path,'rb') as f:
-        (ai,ti,mp3_paths) = pickle.load(f)
+        (ai,ti,mp3_paths) = compress_pickle.load(f,compression='gzip')
     return (ai,ti,mp3_paths)
 
 def import_and_save(search_directory="audio_files",save_path="./saved_file.pickled",*,audio_list = None, text_list = None, file_list=None):
+    # tf.config.experimental.set_memory_growth(tf.config.list_physical_devices('GPU')[0],True)
     if audio_list is None:
         audio_list = 0
         audio_list = []
@@ -38,14 +39,24 @@ def import_and_save(search_directory="audio_files",save_path="./saved_file.pickl
     
     for entry in tqdm(os.scandir(search_directory)):
         if entry.is_file() and entry.name.split(".")[1] in accepted_audio_file_type_list and entry.path not in file_list: #we assume that for each audio file there will be a corresponding text file
+            print(entry.path)
             y = AudioSegment.from_file(entry.path,frame_rate=44100)
             y = y.set_frame_rate(44100)
             y = np.frombuffer(y.raw_data,dtype=np.int16)
-            f,t,y = scipy.signal.stft(y,fs=44100,nperseg=2500)
-            y = np.transpose(np.abs(y))
             
-            y = tf.constant(y)
+            y = y.astype(np.float32)
+            # f,t,y = scipy.signal.stft(y,fs=44100,nperseg=2500)
+            # with tf.device('/cpu:0'):
+            y += tf.random.normal(y.shape,mean=0,stddev=6000)
+            y = tf.signal.stft(y,2500,2500,pad_end=True,fft_length=2500)
+            # y = np.transpose(np.abs(y))
+            with tf.device('/cpu:0'): #Seems to be the only way to force TF to store y in RAM from hereon in
+                #(the underlying numpy array is not modified again after this; because they are immutable, it is rewritten during this 
+                #operation, so this represents an opportunity to copy it into RAM. Because tf.constant then captures a pointer to y, 
+                #if we don't move it into RAM now then each tensor in audio_list lives in VRAM and we run out of VRAM rather quickly!)
+                y = tf.abs(y)
             
+            y = tf.constant(y)            
             audio_list.append(y)
             with open(entry.path.split(".")[0]+".txt",errors='ignore') as f:#there are some non-unicode control characters in the ARRL texts. 
                 text_list.append(f.read().replace("\n"," "))
@@ -53,11 +64,12 @@ def import_and_save(search_directory="audio_files",save_path="./saved_file.pickl
 
 
     #Stack the newly acquired data into TF tensors
-    audio_input = stack_ragged(audio_list) #ragged tensor needed here
-    text_input = tf.constant(text_list)
+    with tf.device('/cpu:0'):#we don't have enough GPU memory to handle the whole dataset at once.
+        audio_input = stack_ragged(audio_list) #ragged tensor needed here
+        text_input = tf.constant(text_list)
 
     with open(save_path,'wb') as f:
-        pickle.dump((audio_input,text_input,file_list),f)
+        compress_pickle.dump((audio_input,text_input,file_list),f,compression='gzip',protocol=4)
 
     return (audio_input,text_input,file_list)
 

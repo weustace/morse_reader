@@ -5,3 +5,4 @@ audio_files/
 *.flac
 *.ogg
 *.pickled
+*.saved_model

@@ -84,4 +84,5 @@ g_output = pipe.predict(g_input)
 with open("experiment_results.pickled",'wb') as f:
     compress_pickle.dump((g_input,g_output),f,compression='gzip')
 
-
+enc_layer = pipe.layers[0]
+enc_layer.save("./encoder.saved_model")

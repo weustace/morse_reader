@@ -7,6 +7,7 @@ import os
 import scipy.signal
 # import simpleaudio as sa
 import compress_pickle
+compression_format='gzip'
 
 audio_list = [] #Python list of np.array for later conversion to tf.RaggedTensor
 text_list = []  #python list of str for later conversion to tf.RaggedTensor
@@ -22,7 +23,7 @@ def stack_ragged(tensors):#from https://stackoverflow.com/questions/57346556/cre
 
 def load_saved(save_path="./saved_file.pickled"):
     with open(save_path,'rb') as f:
-        (ai,ti,mp3_paths) = compress_pickle.load(f,compression='gzip')
+        (ai,ti,mp3_paths) = compress_pickle.load(f,compression=compression_format)
     return (ai,ti,mp3_paths)
 
 def import_and_save(search_directory="audio_files",save_path="./saved_file.pickled",*,audio_list = None, text_list = None, file_list=None):
@@ -40,15 +41,15 @@ def import_and_save(search_directory="audio_files",save_path="./saved_file.pickl
     for entry in tqdm(os.scandir(search_directory)):
         if entry.is_file() and entry.name.split(".")[1] in accepted_audio_file_type_list and entry.path not in file_list: #we assume that for each audio file there will be a corresponding text file
             print(entry.path)
-            y = AudioSegment.from_file(entry.path,frame_rate=44100)
-            y = y.set_frame_rate(44100)
+            y = AudioSegment.from_file(entry.path,frame_rate=FIXED_SAMP_RATE)
+            y = y.set_frame_rate(FIXED_SAMP_RATE)
             y = np.frombuffer(y.raw_data,dtype=np.int16)
             
             y = y.astype(np.float32)
             # f,t,y = scipy.signal.stft(y,fs=44100,nperseg=2500)
             # with tf.device('/cpu:0'):
             y += tf.random.normal(y.shape,mean=0,stddev=6000)
-            y = tf.signal.stft(y,2500,2500,pad_end=True,fft_length=2500)
+            y = tf.signal.stft(y,int(0.05*FIXED_SAMP_RATE),int(0.05*FIXED_SAMP_RATE),pad_end=True,fft_length=int(0.05*FIXED_SAMP_RATE))
             # y = np.transpose(np.abs(y))
             with tf.device('/cpu:0'): #Seems to be the only way to force TF to store y in RAM from hereon in
                 #(the underlying numpy array is not modified again after this; because they are immutable, it is rewritten during this 
@@ -58,8 +59,8 @@ def import_and_save(search_directory="audio_files",save_path="./saved_file.pickl
             
             y = tf.constant(y)            
             audio_list.append(y)
-            with open(entry.path.split(".")[0]+".txt",errors='ignore') as f:#there are some non-unicode control characters in the ARRL texts. 
-                text_list.append(f.read().replace("\n"," "))
+            with open(entry.path.split(".")[0]+".txt",errors='ignore') as f:#there are some non-unicode control characters in the ARRL texts--0x1a = 'substitute' 
+                text_list.append(f.read().replace("\n"," ").replace("\x1a",""))
             file_list.append(entry.path)
 
 
@@ -69,7 +70,7 @@ def import_and_save(search_directory="audio_files",save_path="./saved_file.pickl
         text_input = tf.constant(text_list)
 
     with open(save_path,'wb') as f:
-        compress_pickle.dump((audio_input,text_input,file_list),f,compression='gzip',protocol=4)
+        compress_pickle.dump((audio_input,text_input,file_list),f,compression=compression_format,protocol=4)
 
     return (audio_input,text_input,file_list)
 
